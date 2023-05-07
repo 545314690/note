@@ -1,0 +1,197 @@
+###    7.hashmap的内部实现是怎样的？扩容机制是什么？1.7和1.8的实现有哪些具体不同区别，以及他们的底层结构有哪些变更？
+
+
+
+# 最常见的 ConcurrentHashMap 面试题解答
+
+## 1 ConcurrentHashMap默认初始容量是多少？
+
+从下面ConcurrentHashMap类的静态变量可以看出它的初始容量为16
+
+## 2 ConCurrentHashmap 的key，value是否可以为null
+
+不行 如果key或者value为null会抛出空指针异常
+
+## 3 ConCurrentHashmap 每次扩容是原来容量的几倍
+
+2倍 在transfer方法里面会创建一个原数组的俩倍的node数组来存放原数据。
+
+## 4 ConCurrentHashmap的数据结构是怎么样的？
+
+1.7是分段锁机制，Segment继承了ReentrantLock。
+
+1.8使用了和hashmap一样的结构：数组+链表+红黑树，由头插法改为尾插法，避免了多线程的扩容时插入导致的死循环。
+
+## 5 存储在ConCurrentHashmap中每个节点是什么样的，有哪些变量
+
+它是实现`Map.Entry<K,V>`接口。里面存放了hash，key，value，以及next节点。它的value和next节点是用volatile进行修饰，可以保证多线程之间的可见性。
+
+## 6 ConCurrentHashmap的put过程是怎样的？
+
+整体流程跟HashMap比较类似，大致是以下几步：
+
+- 如果桶数组未初始化，则初始化；
+- 如果待插入的元素所在的桶为空，则尝试把此元素直接插入到桶的第一个位置；
+- 如果正在扩容，则当前线程一起加入到扩容的过程中；
+- 如果待插入的元素所在的桶不为空且不在迁移元素，则锁住这个桶（分段锁）；
+- 如果当前桶中元素以链表方式存储，则在链表中寻找该元素或者插入元素；
+- 如果当前桶中元素以红黑树方式存储，则在红黑树中寻找该元素或者插入元素；
+- 如果元素存在，则返回旧值；
+- 如果元素不存在，整个Map的元素个数加1，并检查是否需要扩容；
+
+添加元素操作中使用的锁主要有（自旋锁 + CAS + synchronized + 分段锁）。
+
+## 7 java1.8中ConCurrentHashmap节点是尾插还是头插
+
+尾插法,见上述put方法。1.8由头插法改为尾插法，避免了多线程的扩容时插入导致的死循环。
+
+## 8 java1.8中，ConCurrentHashmap什么情况下链表才会转换成红黑树进行存储？
+
+链表长度大于8。数组长度大于64。从put源码和以下源码可以看出：并非一开始就创建红黑树结构，如果当前Node数组长度小于阈值`MIN_TREEIFY_CAPACITY`，默认为64，先通过扩大数组容量为原来的两倍以缓解单个链表元素过大的性能问题。
+
+## 9 java1.8中，ConCurrentHashmap的get过程是怎样的？
+
+- 计算 hash 值
+- 根据 hash 值找到数组对应位置: (n - 1) & h
+- 根据该位置处结点性质进行相应查找
+
+如果该位置为 null，那么直接返回 null 就可以了
+
+如果该位置处的节点刚好就是我们需要的，返回该节点的值即可
+
+如果该位置节点的 hash 值小于 0，说明正在扩容，或者是红黑树，后面我们再介绍 find 方法如果以上 3 条都不满足，那就是链表，进行遍历比对即可
+
+## 10 java1.8中，ConCurrentHashmap是如何计算它的size大小的？
+
+对于size的计算，在扩容和`addCount()`方法就已经有处理了，可以注意一下Put函数，里面就有`addCount()`函数。
+
+## 11 ConcurrentHashMap有哪些构造函数？
+
+一共有五个，作用及代码如下：
+
+```
+//无参构造函数
+public ConcurrentHashMap() {
+        }
+//可传初始容器大小的构造函数
+public ConcurrentHashMap(int initialCapacity) {
+        if (initialCapacity < 0)
+            throw new IllegalArgumentException();
+            int cap = ((initialCapacity >= (MAXIMUM_CAPACITY >>> 1)) ?
+            MAXIMUM_CAPACITY :
+            tableSizeFor(initialCapacity + (initialCapacity >>> 1) + 1));
+            this.sizeCtl = cap;
+        }
+//可传入map的构造函数
+public ConcurrentHashMap(Map<? extends K, ? extends V> m) {
+            this.sizeCtl = DEFAULT_CAPACITY;
+            putAll(m);
+        }
+//可设置阈值和初始容量
+public ConcurrentHashMap(int initialCapacity, float loadFactor) {
+            this(initialCapacity, loadFactor, 1);
+        }
+
+//可设置初始容量和阈值和并发级别
+public ConcurrentHashMap(int initialCapacity,
+        float loadFactor, int concurrencyLevel) {
+        if (!(loadFactor > 0.0f) || initialCapacity < 0 || concurrencyLevel <= 0)
+            throw new IllegalArgumentException();
+        if (initialCapacity < concurrencyLevel)   // Use at least as many bins
+            initialCapacity = concurrencyLevel;   // as estimated threads
+            long size = (long)(1.0 + (long)initialCapacity / loadFactor);
+            int cap = (size >= (long)MAXIMUM_CAPACITY) ?
+                MAXIMUM_CAPACITY : tableSizeFor((int)size);
+            this.sizeCtl = cap;
+        }
+```
+
+## 12 ConcurrentHashMap使用什么技术来保证线程安全？
+
+jdk1.7：Segment+HashEntry来进行实现的；
+
+jdk1.8：放弃了Segment臃肿的设计，采用`Node+CAS+Synchronized`来保证线程安全；
+
+## 13 ConcurrentHashMap的get方法是否要加锁，为什么？
+
+不需要，get方法采用了unsafe方法，来保证线程安全。读操作无锁化，因为Node的数据和nextNode指针都是使用volatile修饰的。保证数据修改了立即被其他线程看到。
+
+## 14 ConcurrentHashMap迭代器是强一致性还是弱一致性？HashMap呢
+
+弱一致性，HashMap强一直性。
+
+ConcurrentHashMap可以支持在迭代过程中，向map添加新元素，而HashMap则抛出了`ConcurrentModificationException`，因为HashMap包含一个修改计数器，当你调用他的`next()`方法来获取下一个元素时，迭代器将会用到这个计数器。
+
+## 15 ConcurrentHashMap1.7和1.8的区别
+
+jdk1.8的实现降低锁的粒度，jdk1.7锁的粒度是基于Segment的，包含多个HashEntry，而jdk1.8锁的粒度就是Node
+
+数据结构：jdk1.7 Segment+HashEntry；jdk1.8 数组+链表+红黑树+CAS+synchronized
+
+##    16 concurrenthashmap如何保证线程安全？1.8相比1.7又做了哪些优化？
+
+修改操作synchronize+cas的方式实现线程安全
+
+读操作无锁化，因为Node的数据和nextNode指针都是使用volatile修饰的。保证数据修改了立即被其他线程看到。
+
+1.7是分段锁机制，Segment继承了ReentrantLock。1.8使用了和hashmap一样的结构：链表+红黑树，由头插法改为尾插法，避免了多线程的扩容时插入导致的死循环。
+
+# java中的数组是不是对象,怎么证明？
+
+在开发中，数组是我们最常用的数据结构，那么java中的数组是不是对象了，这是一个很值得思考的的问题，别急，我们来一步一步的分析，首先我们来分析对象的特点，说的直白点就是对象的特点是封装了一些数据，同时提供了一些属性和方法，那么我们再来看看数组，数组是指具有相同类型的数据的集合，它们一般具有固定的长度，并且在内存中占据连续的空间。另外我们需要知道一点，在C/C++语言中，数组名只是一个指针，这个指针指向了数组的首元素，既没有属性也没有方法调用，那么在java语言中，数组不仅有自己的属性（列如length属性，作用输出数组长度）也有一些方法可以被调用（列如clone方法）那么，从数组的这些角度我们可以分析出，数组就是个对象。
+https://blog.csdn.net/sdgames/article/details/105000662
+
+```
+public static void main(String[] args) throws InterruptedException {
+    int [] a = new int[2];
+
+    a.clone();
+    synchronized (a){
+        a.wait();
+        a.notify();
+    }
+    System.out.println(a.length);;
+
+    System.out.println(a instanceof int[]);
+}
+```
+
+# Java四种引用
+
+
+在JDK 1.2版之后，Java对引用的概念进行了扩充，将引用分为强引用（Strongly Re-ference）、软引用（Soft Reference）、弱引用（Weak Reference）和虚引用（Phantom Reference）4种，这4种引用强 度依次逐渐减弱。
+
+
+![image-20220507171239616](images/image-20220507171239616.png)
+
+Java中提供这四种引用类型主要有两个目的 ：
+
+- 可以让程序员通过代码的方式决定某些对象的生命周期。
+
+- 有利于JVM进行垃圾回收。
+
+  原文链接：https://blog.csdn.net/qq_53643258/article/details/119719965
+
+# [常见容错机制：failover、failfast、failback、failsafe](https://www.cnblogs.com/maji233/p/11770416.html)
+
+1.failover：失效转移
+Fail-Over的含义为“失效转移”，是一种备份操作模式，当主要组件异常时，其功能转移到备份组件。其要点在于有主有备，且主故障时备可启用，并设置为主。如Mysql的双Master模式，当正在使用的Master出现故障时，可以拿备Master做主使用
+
+2.failfast：快速失败
+从字面含义看就是“快速失败”，尽可能的发现系统中的错误，使系统能够按照事先设定好的错误的流程执行，对应的方式是“fault-tolerant（错误容忍）”。以JAVA集合（Collection）的快速失败为例，当多个线程对同一个集合的内容进行操作时，就可能会产生fail-fast事件。例如：当某一个线程A通过iterator去遍历某集合的过程中，若该集合的内容被其他线程所改变了；那么线程A访问集合时，就会抛出ConcurrentModificationException异常（发现错误执行设定好的错误的流程），产生fail-fast事件。
+
+3.failback：失效自动恢复
+Fail-over之后的自动恢复，在簇网络系统（有两台或多台服务器互联的网络）中，由于要某台服务器进行维修，需要网络资源和服务暂时重定向到备用系统。在此之后将网络资源和服务器恢复为由原始主机提供的过程，称为自动恢复
+
+4.failsafe：失效安全
+Fail-Safe的含义为“失效安全”，即使在故障的情况下也不会造成伤害或者尽量减少伤害。维基百科上一个形象的例子是红绿灯的“冲突监测模块”当监测到错误或者冲突的信号时会将十字路口的红绿灯变为闪烁错误模式，而不是全部显示为绿灯。
+
+### 快速失败与Java中的失败安全迭代器：
+
+| 失败快速迭代器failfast                                       | 故障安全迭代器failsafe                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 失败快速迭代器不允许在对集合进行迭代时对其进行修改。         | 故障保护迭代器允许在对集合进行迭代时对其进行修改。           |
+| 如果在迭代集合时对其进行了修改，则这些迭代器将引发*ConcurrentModificationException*。 | 如果在迭代集合时对其进行了修改，则这些迭代器不会引发任何异常。 |
+| 他们使用原始集合遍历集合的元素。                             | 他们使用原始集合的副本遍历集合的元素。                       |
+| 这些迭代器不需要额外的内存。                                 | 这些迭代器需要额外的内存来克隆集合。                         |
+| 例如：*ArrayList*，*Vector*，*HashMap*返回的迭代器。         | 例如：*ConcurrentHashMap*返回的迭代器*。*                    |

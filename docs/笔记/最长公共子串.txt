@@ -1,0 +1,42 @@
+//给定两个字符串str1和str2,输出两个字符串的最长公共子串，如果最长公共子串为空，输出-1。
+import java.util.*;
+
+
+public class Solution {
+    /**
+     * longest common substring
+     * @param str1 string字符串 the string
+     * @param str2 string字符串 the string
+     * @return string字符串
+     */
+    public String LCS (String str1, String str2) {
+        // write code here
+        int L1 = str1.length();
+        int L2 = str2.length();
+        //dp[i][j]保存str1的前i个字符和str2的前j个字符连续匹配的长度
+        //
+        int[][] dp = new int[L1+1][L2+1];
+        int maxLen = 0; //保存连续匹配最大长度，即为dp[i][j]的最大值
+        int endPos = 0; //保存dp[i][j]最大时，i的位置
+        for(int i=1;i<=L1;i++){
+            for(int j=1;j<=L2;j++){
+                if(str1.charAt(i-1) == str2.charAt(j-1)){
+                    dp[i][j] = dp[i-1][j-1]+1;
+                    if(maxLen<dp[i][j]){
+                       maxLen = dp[i][j];
+                       endPos = i;  
+                    }
+
+                }else{
+                    dp[i][j] = 0;
+                }
+            }
+        }
+        if(maxLen==0){ //没有一个字符匹配上
+            return "-1";
+        }else{ //截取字符串
+            return str1.substring(endPos-maxLen,endPos);
+        }
+        
+    }
+}
